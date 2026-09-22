@@ -1,0 +1,164 @@
+-- Material Request Management System (PostgreSQL)
+-- WARNING: bagian DROP di bawah menghapus seluruh data. Gunakan hanya untuk instalasi baru.
+
+DROP TABLE IF EXISTS material_transactions CASCADE;
+DROP TABLE IF EXISTS rfi_approvals CASCADE;
+DROP TABLE IF EXISTS rfi_revision_items CASCADE;
+DROP TABLE IF EXISTS rfi_revisions CASCADE;
+DROP TABLE IF EXISTS rfi_items CASCADE;
+DROP TABLE IF EXISTS rfis CASCADE;
+DROP TABLE IF EXISTS materials CASCADE;
+DROP TABLE IF EXISTS projects CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS roles CASCADE;
+DROP TABLE IF EXISTS departments CASCADE;
+
+CREATE TABLE departments (
+    id BIGSERIAL PRIMARY KEY,
+    department_code VARCHAR(30) NOT NULL UNIQUE,
+    department_name VARCHAR(100) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE roles (
+    id BIGSERIAL PRIMARY KEY,
+    role_code VARCHAR(30) NOT NULL UNIQUE CHECK (role_code IN ('DOCONT', 'INSPECTOR', 'MATERIAL_MAN')),
+    role_name VARCHAR(100) NOT NULL,
+    department_id BIGINT NULL REFERENCES departments(id) ON UPDATE CASCADE ON DELETE SET NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO roles (role_code, role_name) VALUES
+    ('DOCONT', 'Document Controller'),
+    ('INSPECTOR', 'Inspector'),
+    ('MATERIAL_MAN', 'Material Manager');
+
+CREATE TABLE users (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    email VARCHAR(150) NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    role_id BIGINT NOT NULL REFERENCES roles(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+    department_id BIGINT NULL REFERENCES departments(id) ON UPDATE CASCADE ON DELETE SET NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE projects (
+    id BIGSERIAL PRIMARY KEY,
+    project_code VARCHAR(50) NOT NULL UNIQUE,
+    project_name VARCHAR(150) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE materials (
+    id BIGSERIAL PRIMARY KEY,
+    material_code VARCHAR(50) NOT NULL UNIQUE,
+    material_name VARCHAR(150) NOT NULL,
+    unit VARCHAR(30) NOT NULL,
+    quantity NUMERIC(14,3) NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE rfis (
+    id BIGSERIAL PRIMARY KEY,
+    rfi_number VARCHAR(50) NOT NULL UNIQUE,
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    project_id BIGINT NOT NULL REFERENCES projects(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+    requester_id BIGINT NOT NULL REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+    inspector_id BIGINT NOT NULL REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+    status VARCHAR(30) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'SUBMITTED', 'APPROVED', 'REVISION_REQUIRED')),
+    submitted_at TIMESTAMP NULL,
+    approved_at TIMESTAMP NULL,
+    rejected_at TIMESTAMP NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE rfi_items (
+    id BIGSERIAL PRIMARY KEY,
+    rfi_id BIGINT NOT NULL REFERENCES rfis(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    revision INTEGER NOT NULL DEFAULT 0,
+    material_id BIGINT NOT NULL REFERENCES materials(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+    material_name VARCHAR(150) NOT NULL,
+    requested_qty NUMERIC(14,3) NOT NULL CHECK (requested_qty > 0),
+    approved_qty NUMERIC(14,3) NOT NULL DEFAULT 0 CHECK (approved_qty >= 0),
+    uom VARCHAR(30) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'READY', 'NOT_READY')),
+    remark TEXT NULL,
+    checked_by BIGINT NULL REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+    checked_at TIMESTAMP NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_rfi_item_material UNIQUE (rfi_id, material_id)
+);
+
+CREATE TABLE rfi_revisions (
+    id BIGSERIAL PRIMARY KEY,
+    rfi_id BIGINT NOT NULL REFERENCES rfis(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    revision INTEGER NOT NULL,
+    reason TEXT NULL,
+    created_by BIGINT NOT NULL REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_rfi_revision UNIQUE (rfi_id, revision)
+);
+
+CREATE TABLE rfi_revision_items (
+    id BIGSERIAL PRIMARY KEY,
+    rfi_revision_id BIGINT NOT NULL REFERENCES rfi_revisions(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    material_id BIGINT NOT NULL REFERENCES materials(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+    material_name VARCHAR(150) NOT NULL,
+    requested_qty NUMERIC(14,3) NOT NULL CHECK (requested_qty > 0),
+    uom VARCHAR(30) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE rfi_approvals (
+    id BIGSERIAL PRIMARY KEY,
+    rfi_id BIGINT NOT NULL REFERENCES rfis(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    revision INTEGER NOT NULL,
+    inspector_id BIGINT NOT NULL REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+    decision VARCHAR(30) NOT NULL CHECK (decision IN ('APPROVED', 'REVISION_REQUIRED')),
+    remark TEXT NULL,
+    action_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE material_transactions (
+    id BIGSERIAL PRIMARY KEY,
+    material_id BIGINT NOT NULL REFERENCES materials(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+    transaction_type VARCHAR(10) NOT NULL CHECK (transaction_type IN ('IN', 'OUT', 'ADJUSTMENT')),
+    quantity NUMERIC(14,3) NOT NULL,
+    quantity_before NUMERIC(14,3) NOT NULL,
+    quantity_after NUMERIC(14,3) NOT NULL CHECK (quantity_after >= 0),
+    reference_type VARCHAR(30) NOT NULL,
+    reference_id BIGINT NULL,
+    created_by BIGINT NULL REFERENCES users(id) ON UPDATE CASCADE ON DELETE SET NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_rfis_requester ON rfis(requester_id);
+CREATE INDEX idx_rfis_inspector ON rfis(inspector_id);
+CREATE INDEX idx_rfis_status ON rfis(status);
+CREATE INDEX idx_rfi_items_rfi ON rfi_items(rfi_id);
+CREATE INDEX idx_material_transactions_material ON material_transactions(material_id, created_at DESC);
+
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$ BEGIN NEW.updated_at = CURRENT_TIMESTAMP; RETURN NEW; END; $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_roles_updated_at BEFORE UPDATE ON roles FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER trg_departments_updated_at BEFORE UPDATE ON departments FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER trg_users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER trg_projects_updated_at BEFORE UPDATE ON projects FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER trg_materials_updated_at BEFORE UPDATE ON materials FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER trg_rfis_updated_at BEFORE UPDATE ON rfis FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER trg_rfi_items_updated_at BEFORE UPDATE ON rfi_items FOR EACH ROW EXECUTE FUNCTION set_updated_at();
